@@ -1,0 +1,51 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^DAY2/
+      - id: end-of-file-fixer
+        files: ^DAY2/
+        exclude: ^DAY2/src/.+\.egg-info/
+      - id: check-yaml
+        files: ^DAY2/
+      - id: check-json
+        files: ^DAY2/
+      - id: check-merge-conflict
+        files: ^DAY2/
+      - id: mixed-line-ending
+        files: ^DAY2/
+        exclude: ^DAY2/src/.+\.egg-info/
+
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        files: ^DAY2/
+        exclude: ^DAY2/src/.+\.egg-info/
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.1
+    hooks:
+      - id: isort
+        files: ^DAY2/
+        args: ["--profile", "black"]
+        exclude: ^DAY2/src/.+\.egg-info/
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        files: ^DAY2/
+        args: ["--config=DAY2/setup.cfg"]
+        exclude: ^DAY2/src/.+\.egg-info/
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python -m pytest -q
+        language: system
+        pass_filenames: false
+        files: ^DAY2/(src|tests)/
+        require_serial: true

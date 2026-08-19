@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+setup.cfg
+src/octopus_day2/__init__.py
+src/octopus_day2/greeter.py
+src/octopus_day2.egg-info/PKG-INFO
+src/octopus_day2.egg-info/SOURCES.txt
+src/octopus_day2.egg-info/dependency_links.txt
+src/octopus_day2.egg-info/top_level.txt
+tests/test_greeter.py

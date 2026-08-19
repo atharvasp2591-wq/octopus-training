@@ -1,0 +1,28 @@
+## SQL Server Database Project - Build Output
+bin/
+obj/
+*.dacpac
+*.sqlproj.user
+
+## Visual Studio
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+
+## NuGet
+packages/
+*.nupkg
+
+## Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+
+## SqlPackage artifacts
+Deploy/
+Report/
+*.deployreport
+*.sql

@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: octopus-day2
+Version: 0.1.0
+Summary: A simple Python package for Day 2 Azure DevOps packaging demo
+Author: Octopus Training
+License-Expression: MIT
+Project-URL: Homepage, https://example.com
+Project-URL: Repository, https://example.com/repository
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# Octopus Day 2 Python Package
+
+This project demonstrates a simple Python package built with modern packaging standards and published through an Azure DevOps pipeline.
+
+## Package overview
+
+The package exposes a simple greeting function that can be used from Python code or from scripts.
+
+## Local development
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -U build pytest
+python -m pytest -q
+python -m build
+```
+
+## Usage
+
+```python
+from octopus_day2.greeter import welcome
+
+print(welcome("Azure DevOps"))
+```

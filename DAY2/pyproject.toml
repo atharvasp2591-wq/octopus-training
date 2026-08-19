@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "octopus-day2"
+version = "0.1.0"
+description = "A simple Python package for Day 2 Azure DevOps packaging demo"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Octopus Training" }
+]
+license = "MIT"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://example.com"
+Repository = "https://example.com/repository"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+pythonpath = ["src"]
