@@ -21,6 +21,10 @@ variables:
   DACPAC_SOURCE_PATH: '$(Pipeline.Workspace)/drop'
   SQL_PACKAGE_VERSION: '162.2.111.2'
   ENVIRONMENT_NAME: 'Development'
+  DevSqlServer: '48.216.208.214,1433'
+  ProdSqlServer: '48.216.208.214,1433'
+  ProdSqlDatabase: 'test'
+  ProdSqlUsername: 'abhi'
 
 stages:
 - stage: Package
@@ -29,7 +33,7 @@ stages:
   - job: BuildDacpac
     displayName: Build SQL Database Project
     pool:
-      vmImage: windows-latest
+      vmImage: windows-2025
     timeoutInMinutes: 30
 
     steps:
@@ -172,7 +176,7 @@ stages:
   - deployment: DeployDacpac
     displayName: Deploy DACPAC to SQL Server
     pool:
-      vmImage: windows-latest
+      vmImage: windows-2025
     environment: $(ENVIRONMENT_NAME)
 
     strategy:
@@ -180,6 +184,14 @@ stages:
         deploy:
           steps:
           - checkout: self
+
+          - powershell: |
+              $os = Get-CimInstance Win32_OperatingSystem
+              Write-Host "Deployment agent OS: $($os.Caption)"
+              if ($os.Caption -notmatch 'Windows Server 2025') {
+                Write-Error "This deployment requires Windows Server 2025."
+              }
+            displayName: Verify Windows Server 2025 agent
 
           - task: DownloadBuildArtifacts@1
             displayName: Download SQL scripts
@@ -189,15 +201,25 @@ stages:
               artifactName: 'sql-scripts'
               downloadPath: '$(Agent.BuildDirectory)'
 
+          - powershell: |
+              $server = '$(DevSqlServer)'.Split(',')[0]
+              $port = 1433
+              Write-Host "Testing TCP connectivity to $server`:$port from the deployment agent..."
+              $result = Test-NetConnection -ComputerName $server -Port $port -InformationLevel Detailed
+              if (-not $result.TcpTestSucceeded) {
+                Write-Error "TCP port $port is not reachable on $server. Open SQL Server TCP $port, allow the Azure DevOps agent through the firewall, or use a self-hosted agent on the SQL network."
+              }
+            displayName: Test SQL Server TCP connectivity
+
           - script: |
               @echo off
               setlocal enabledelayedexpansion
               
               REM Configure SQL Server connection details
-              set SQL_SERVER=localhost
-              set SQL_DATABASE=OctopusDeploymentDB
-              set SQL_USERNAME=sa
-              set SQL_PASSWORD=$(SqlServerPassword)
+              set "SQL_SERVER=$(DevSqlServer)"
+              set "SQL_DATABASE=test"
+              set "SQL_USERNAME=abhi"
+              set "SQL_PASSWORD=%SqlServerPassword%"
               
               echo ==========================================
               echo Attempting to Deploy SQL Scripts to Development
@@ -205,29 +227,25 @@ stages:
               echo Server: !SQL_SERVER!
               echo Database: !SQL_DATABASE!
               echo.
-              echo NOTE: This step requires SQL Server to be running locally
-              echo If SQL Server is not available, this deployment will be skipped
+              echo This step requires network access to the configured SQL Server
               echo.
               
               REM Test connection first
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -Q "SELECT @@VERSION;" -t 5 2>nul
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -C -Q "SELECT @@VERSION;" -l 5
               
               if !errorlevel! neq 0 (
                 echo.
                 echo ⚠ SQL Server not accessible at !SQL_SERVER!
-                echo Skipping deployment. To enable:
-                echo 1. Install SQL Server locally or in Docker
-                echo 2. Set SqlServerPassword pipeline variable
-                echo 3. Update SQL_SERVER variable to your server address
+                echo Check TCP port 1433, SQL authentication, the sa password, and firewall rules.
                 echo.
-                exit /b 0
+                exit /b 1
               )
               
               echo ✓ SQL Server is accessible
               echo.
               
               REM Create database if it doesn't exist
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -Q "IF NOT EXISTS(SELECT 1 FROM sys.databases WHERE name='!SQL_DATABASE!') CREATE DATABASE [!SQL_DATABASE!];" -t 10
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -C -b -Q "IF NOT EXISTS(SELECT 1 FROM sys.databases WHERE name='!SQL_DATABASE!') CREATE DATABASE [!SQL_DATABASE!];" -l 10
               
               if !errorlevel! neq 0 (
                 echo Warning: Could not create database, but continuing
@@ -238,7 +256,7 @@ stages:
               echo Deploying Tables...
               for /r "$(Agent.BuildDirectory)\sql-scripts\dbo\Tables" %%F in (*.sql) do (
                 echo Executing: %%~nxF
-                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -i "%%F" -t 10
+                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -b -i "%%F" -l 10
                 
                 if !errorlevel! neq 0 (
                   echo Warning: Error executing %%~nxF (continuing)
@@ -250,7 +268,7 @@ stages:
               echo Deploying Stored Procedures...
               for /r "$(Agent.BuildDirectory)\sql-scripts\dbo\StoredProcedures" %%F in (*.sql) do (
                 echo Executing: %%~nxF
-                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -i "%%F" -t 10
+                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -b -i "%%F" -l 10
                 
                 if !errorlevel! neq 0 (
                   echo Warning: Error executing %%~nxF (continuing)
@@ -260,7 +278,6 @@ stages:
               echo.
               echo ✓ SQL deployment completed
             displayName: Deploy SQL scripts to Development
-            continueOnError: true
             env:
               SqlServerPassword: $(SqlServerPassword)
 
@@ -268,24 +285,23 @@ stages:
               @echo off
               setlocal enabledelayedexpansion
               
-              set SQL_SERVER=localhost
-              set SQL_DATABASE=OctopusDeploymentDB
-              set SQL_USERNAME=sa
-              set SQL_PASSWORD=$(SqlServerPassword)
+              set "SQL_SERVER=$(DevSqlServer)"
+              set "SQL_DATABASE=test"
+              set "SQL_USERNAME=abhi"
+              set "SQL_PASSWORD=%SqlServerPassword%"
               
               REM Try to verify deployment, but don't fail if SQL Server is not available
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -Q "SELECT @@VERSION;" -t 5 2>nul
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -Q "SELECT @@VERSION;" -l 5
               
               if !errorlevel! equ 0 (
                 echo ✓ Database connection verified
                 echo ✓ Deployment successful
               ) else (
                 echo.
-                echo Note: SQL Server not available for verification
-                echo Database objects may have been created locally
+                echo Error: SQL Server verification failed for !SQL_SERVER!
+                exit /b 1
               )
             displayName: Verify SQL Server deployment
-            continueOnError: true
             env:
               SqlServerPassword: $(SqlServerPassword)
 
@@ -297,7 +313,7 @@ stages:
   - deployment: DeployDacpacProd
     displayName: Deploy DACPAC to Production SQL Server
     pool:
-      vmImage: windows-latest
+      vmImage: windows-2025
     environment: 'Production'
 
     strategy:
@@ -305,6 +321,14 @@ stages:
         deploy:
           steps:
           - checkout: self
+
+          - powershell: |
+              $os = Get-CimInstance Win32_OperatingSystem
+              Write-Host "Deployment agent OS: $($os.Caption)"
+              if ($os.Caption -notmatch 'Windows Server 2025') {
+                Write-Error "This deployment requires Windows Server 2025."
+              }
+            displayName: Verify Windows Server 2025 agent
 
           - task: DownloadBuildArtifacts@1
             displayName: Download SQL scripts
@@ -319,10 +343,10 @@ stages:
               setlocal enabledelayedexpansion
               
               REM Configure Production SQL Server connection details
-              set SQL_SERVER=$(ProdSqlServer)
-              set SQL_DATABASE=$(ProdSqlDatabase)
-              set SQL_USERNAME=$(ProdSqlUsername)
-              set SQL_PASSWORD=$(ProdSqlPassword)
+              set "SQL_SERVER=$(ProdSqlServer)"
+              set "SQL_DATABASE=$(ProdSqlDatabase)"
+              set "SQL_USERNAME=$(ProdSqlUsername)"
+              set "SQL_PASSWORD=%SqlServerPassword%"
               
               echo ==========================================
               echo Deploying SQL Scripts to Production
@@ -331,7 +355,7 @@ stages:
               echo Database: !SQL_DATABASE!
               
               REM Verify database exists before deployment
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -Q "SELECT @@VERSION;"
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -C -b -Q "SELECT @@VERSION;" -l 5
               
               if !errorlevel! neq 0 (
                 echo Error: Cannot connect to production database
@@ -342,7 +366,7 @@ stages:
               echo.
               echo Creating database backup...
               set BACKUP_PATH=C:\SQLBackups\!SQL_DATABASE!_$(Build.BuildId).bak
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -Q "BACKUP DATABASE [!SQL_DATABASE!] TO DISK = N'!BACKUP_PATH!' WITH NOFORMAT, NOINIT, STATS = 10;"
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -C -b -Q "BACKUP DATABASE [!SQL_DATABASE!] TO DISK = N'!BACKUP_PATH!' WITH NOFORMAT, NOINIT, STATS = 10;" -l 10
               
               if !errorlevel! neq 0 (
                 echo Warning: Backup failed, continuing with deployment
@@ -355,7 +379,7 @@ stages:
               echo Deploying Tables...
               for /r "$(Agent.BuildDirectory)\sql-scripts\dbo\Tables" %%F in (*.sql) do (
                 echo Executing: %%F
-                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -i "%%F"
+                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -b -i "%%F" -l 10
                 
                 if !errorlevel! neq 0 (
                   echo Error executing %%F
@@ -368,7 +392,7 @@ stages:
               echo Deploying Stored Procedures...
               for /r "$(Agent.BuildDirectory)\sql-scripts\dbo\StoredProcedures" %%F in (*.sql) do (
                 echo Executing: %%F
-                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -i "%%F"
+                sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -b -i "%%F" -l 10
                 
                 if !errorlevel! neq 0 (
                   echo Error executing %%F
@@ -383,19 +407,19 @@ stages:
               ProdSqlServer: $(ProdSqlServer)
               ProdSqlDatabase: $(ProdSqlDatabase)
               ProdSqlUsername: $(ProdSqlUsername)
-              ProdSqlPassword: $(ProdSqlPassword)
+              SqlServerPassword: $(SqlServerPassword)
 
           - script: |
               @echo off
               setlocal enabledelayedexpansion
               
               REM Verify production deployment
-              set SQL_SERVER=$(ProdSqlServer)
-              set SQL_DATABASE=$(ProdSqlDatabase)
-              set SQL_USERNAME=$(ProdSqlUsername)
-              set SQL_PASSWORD=$(ProdSqlPassword)
+              set "SQL_SERVER=$(ProdSqlServer)"
+              set "SQL_DATABASE=$(ProdSqlDatabase)"
+              set "SQL_USERNAME=$(ProdSqlUsername)"
+              set "SQL_PASSWORD=%SqlServerPassword%"
               
-              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -Q "SELECT @@VERSION;"
+              sqlcmd -S "!SQL_SERVER!" -U "!SQL_USERNAME!" -P "!SQL_PASSWORD!" -d "!SQL_DATABASE!" -C -Q "SELECT @@VERSION;" -l 5
               
               if !errorlevel! equ 0 (
                 echo ✓ Production database connection verified
@@ -408,4 +432,4 @@ stages:
               ProdSqlServer: $(ProdSqlServer)
               ProdSqlDatabase: $(ProdSqlDatabase)
               ProdSqlUsername: $(ProdSqlUsername)
-              ProdSqlPassword: $(ProdSqlPassword)
+              SqlServerPassword: $(SqlServerPassword)
