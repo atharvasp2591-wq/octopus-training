@@ -1,0 +1,104 @@
+trigger:
+  branches:
+    include:
+      - main # Change to the build branch.
+      - master # Change or remove if unused.
+  paths:
+    include:
+      - DAY3/* # Change to the folder that should trigger this pipeline.
+
+pr: none
+
+variables:
+  DotNetVersion: '8.x' # Change to the supported .NET SDK version.
+  SqlProject: '$(Build.SourcesDirectory)/DAY3/Database/OctopusDatabase.sqlproj' # Change to the SQL project path.
+  PackageId: 'octopus-database' # Change to the Octopus package ID.
+  OctopusSpace: 'Default' # Change to the Octopus space name.
+  OctopusProject: 'octopus-deployment-test-1' # Change to the Octopus project name.
+  OctopusEnvironment: 'Development' # Change to the deployment environment.
+
+stages:
+- stage: Package
+  displayName: Build and publish SQL package
+  jobs:
+  - job: BuildDacpac
+    displayName: Build DACPAC
+    pool:
+      vmImage: windows-2025 # Change to the required Azure agent image.
+    steps:
+    - checkout: self
+
+    - task: UseDotNet@2
+      displayName: Install .NET SDK
+      inputs:
+        packageType: sdk
+        version: $(DotNetVersion)
+
+    - task: DotNetCoreCLI@2
+      displayName: Build SQL project
+      inputs:
+        command: build
+        projects: $(SqlProject)
+        arguments: '--configuration Release --output "$(Build.ArtifactStagingDirectory)/sql-build" --property:DSP=Microsoft.Data.Tools.Schema.Sql.Sql150DatabaseSchemaProvider'
+
+    - powershell: |
+        $dacpac = Get-ChildItem -Path '$(Build.ArtifactStagingDirectory)/sql-build' -Filter '*.dacpac' -Recurse | Select-Object -First 1
+        if (-not $dacpac) { throw 'The SQL project build did not produce a DACPAC.' }
+        Copy-Item $dacpac.FullName '$(Build.ArtifactStagingDirectory)/octopus-database.dacpac'
+        Copy-Item '$(Build.SourcesDirectory)/DAY3/Scripts/Deploy-Dacpac.ps1' '$(Build.ArtifactStagingDirectory)/Deploy-Dacpac.ps1'
+      displayName: Stage DACPAC package
+
+    - task: ArchiveFiles@2
+      displayName: Create Octopus package
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: '$(Build.ArtifactStagingDirectory)/$(PackageId).$(Build.BuildNumber).zip'
+        replaceExistingArchive: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Azure DevOps artifact
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/$(PackageId).$(Build.BuildNumber).zip'
+        artifact: '$(PackageId)'
+
+    - task: OctopusPush@6
+      displayName: Push package to Octopus feed
+      inputs:
+        OctoConnectedServiceName: 'octopus connection' # Change to the Azure DevOps service connection name.
+        Space: '$(OctopusSpace)'
+        Packages: '$(Build.ArtifactStagingDirectory)/$(PackageId).$(Build.BuildNumber).zip'
+        FeedId: 'feeds-builtin' # Change to the Octopus package feed ID.
+        PackageId: '$(PackageId)'
+        PackageVersion: '$(Build.BuildNumber)'
+
+    - task: OctopusCreateRelease@6
+      displayName: Create Octopus release
+      inputs:
+        OctoConnectedServiceName: 'octopus connection' # Change to the Azure DevOps service connection name.
+        Space: '$(OctopusSpace)'
+        Project: '$(OctopusProject)'
+        GitRef: '$(Build.SourceVersion)'
+        ReleaseNumber: '$(Build.BuildNumber)'
+        Packages: '$(PackageId):$(Build.BuildNumber)'
+
+- stage: DeployDevelopment
+  displayName: Deploy through Octopus to Windows Server 2025
+  dependsOn: Package
+  condition: succeeded()
+  jobs:
+  - job: DeployWithOctopus
+    pool:
+      vmImage: windows-2025 # Change to the required Azure agent image.
+    steps:
+    - task: OctopusDeployRelease@6
+      displayName: Deploy Octopus release
+      inputs:
+        OctoConnectedServiceName: 'octopus connection' # Change to the Azure DevOps service connection name.
+        Space: '$(OctopusSpace)'
+        Project: '$(OctopusProject)'
+        ReleaseNumber: '$(Build.BuildNumber)'
+        Environments: '$(OctopusEnvironment)'
+        ShowProgress: true
+        WaitForDeployment: true

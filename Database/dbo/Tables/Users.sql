@@ -1,0 +1,10 @@
+CREATE TABLE [dbo].[Users] (
+    [UserId] INT IDENTITY(1,1) PRIMARY KEY,
+    [Username] NVARCHAR(100) NOT NULL UNIQUE,
+    [Email] NVARCHAR(255) NOT NULL UNIQUE,
+    [FirstName] NVARCHAR(100),
+    [LastName] NVARCHAR(100),
+    [CreatedAt] DATETIME2 DEFAULT GETUTCDATE(),
+    [UpdatedAt] DATETIME2 DEFAULT GETUTCDATE(),
+    [IsActive] BIT DEFAULT 1
+);
